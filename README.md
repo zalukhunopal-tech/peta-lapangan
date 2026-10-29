@@ -9,6 +9,8 @@ Aplikasi web (PWA) untuk kerja lapangan. Fungsinya:
 
 Semua peta dan data disimpan di HP itu sendiri.
 
+**Buka aplikasinya:** https://zalukhunopal-tech.github.io/peta-lapangan/
+
 Aplikasi ini ditulis dari nol dan tidak memakai kode dari aplikasi peta lain.
 
 ## Fitur
