@@ -1,0 +1,20 @@
+{
+  "name": "peta-lapangan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aplikasi web offline untuk membuka peta GeoPDF, melihat posisi GPS, menandai titik, dan merekam jalur di lapangan.",
+  "type": "module",
+  "scripts": {
+    "vendor": "node tools/vendor.mjs",
+    "contoh": "node tools/buat-contoh-geopdf.mjs",
+    "ikon": "node tools/buat-ikon.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "serve": "node tools/serve.mjs"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "0.9.12",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.10.38",
+    "proj4": "2.22.0"
+  }
+}

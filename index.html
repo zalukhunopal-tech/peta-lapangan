@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f5f45">
+  <meta name="description" content="Buka peta GeoPDF secara offline, lihat posisi GPS, tandai titik, dan rekam jalur di lapangan.">
+  <title>Peta Lapangan</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="ikon/ikon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="ikon/ikon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="vendor/pdf-lib/pdf-lib.min.js" defer></script>
+  <script src="vendor/proj4/proj4.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" hidden>
+    <symbol id="i-kembali" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></symbol>
+    <symbol id="i-setelan" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+    <symbol id="i-tambah" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-kurang" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-lokasi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+    <symbol id="i-titik" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.7-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.3 12 21 12 21z"/><circle cx="12" cy="9.8" r="2.3"/></symbol>
+    <symbol id="i-jalur" viewBox="0 0 24 24"><path d="M5 18c2.5-5 5.5 1 8.5-4.5S17 6 19 6"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/></symbol>
+    <symbol id="i-rekam" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-henti" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-unduh" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-unggah" viewBox="0 0 24 24"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"/></symbol>
+    <symbol id="i-peta" viewBox="0 0 24 24"><path d="M3 6.5l6-3 6 3 6-3v14l-6 3-6-3-6 3z"/><path d="M9 3.5v14M15 6.5v14"/></symbol>
+  </svg>
+
+  <section id="layar-daftar" class="layar aktif">
+    <header class="kepala">
+      <svg class="ikon logo" aria-hidden="true"><use href="#i-peta"/></svg>
+      <h1>Peta Lapangan</h1>
+      <button id="indikator-rekam" class="indikator-rekam" hidden>
+        <svg class="ikon" aria-hidden="true"><use href="#i-henti"/></svg><span></span>
+      </button>
+      <button id="tombol-setelan" class="tombol-ikon" aria-label="Setelan">
+        <svg class="ikon" aria-hidden="true"><use href="#i-setelan"/></svg>
+      </button>
+    </header>
+    <nav class="tab" role="tablist">
+      <button role="tab" data-tab="peta" aria-selected="true">Peta</button>
+      <button role="tab" data-tab="data" aria-selected="false">Data lapangan</button>
+    </nav>
+
+    <div id="tab-peta" class="isi-tab">
+      <ul id="daftar-peta" class="daftar"></ul>
+      <div id="kosong-peta" class="kosong" hidden>
+        <svg class="ikon besar" aria-hidden="true"><use href="#i-peta"/></svg>
+        <p><strong>Belum ada peta.</strong><br>Impor berkas GeoPDF dari HP Anda. Setelah diimpor, peta bisa dibuka tanpa internet.</p>
+        <button id="tombol-contoh" class="tombol sekunder">Coba dengan peta contoh</button>
+      </div>
+    </div>
+
+    <div id="tab-data" class="isi-tab" hidden>
+      <div class="aksi-data">
+        <button id="tombol-ekspor-kml" class="tombol sekunder"><svg class="ikon" aria-hidden="true"><use href="#i-unduh"/></svg>KML</button>
+        <button id="tombol-ekspor-gpx" class="tombol sekunder"><svg class="ikon" aria-hidden="true"><use href="#i-unduh"/></svg>GPX</button>
+        <label class="tombol sekunder"><svg class="ikon" aria-hidden="true"><use href="#i-unggah"/></svg>Impor
+          <input type="file" id="masukan-data" accept=".kml,.gpx,application/vnd.google-earth.kml+xml,application/gpx+xml,text/xml" hidden>
+        </label>
+      </div>
+      <ul id="daftar-fitur" class="daftar"></ul>
+      <p id="kosong-fitur" class="kosong" hidden>Belum ada titik atau jalur. Buka sebuah peta untuk menandai titik atau merekam jalur.</p>
+    </div>
+
+    <label class="fab" id="tombol-impor">
+      <svg class="ikon" aria-hidden="true"><use href="#i-tambah"/></svg>Impor peta
+      <input type="file" id="masukan-peta" accept="application/pdf,.pdf" hidden>
+    </label>
+  </section>
+
+  <section id="layar-peta" class="layar">
+    <canvas id="kanvas-peta" aria-label="Peta"></canvas>
+    <header class="kepala-peta">
+      <button id="tombol-kembali" class="tombol-bulat" aria-label="Kembali ke daftar peta">
+        <svg class="ikon" aria-hidden="true"><use href="#i-kembali"/></svg>
+      </button>
+      <div id="judul-peta" class="judul-peta"></div>
+      <button id="tombol-info-peta" class="tombol-bulat" aria-label="Info peta">
+        <svg class="ikon" aria-hidden="true"><use href="#i-info"/></svg>
+      </button>
+    </header>
+    <div id="panel-lokasi" class="panel-lokasi" aria-live="polite"></div>
+
+    <div class="kontrol-kanan">
+      <button id="tombol-perbesar" class="tombol-bulat" aria-label="Perbesar"><svg class="ikon" aria-hidden="true"><use href="#i-tambah"/></svg></button>
+      <button id="tombol-perkecil" class="tombol-bulat" aria-label="Perkecil"><svg class="ikon" aria-hidden="true"><use href="#i-kurang"/></svg></button>
+      <button id="tombol-lokasi" class="tombol-bulat" aria-label="Ke lokasi saya"><svg class="ikon" aria-hidden="true"><use href="#i-lokasi"/></svg></button>
+    </div>
+
+    <div id="silang" class="silang" hidden></div>
+    <div id="bilah-pilih" class="bilah-pilih" hidden>
+      <p>Geser peta sampai tanda <strong>+</strong> tepat di lokasi, atau pakai posisi GPS.</p>
+      <p id="pilih-koordinat" class="koordinat"></p>
+      <div class="aksi">
+        <button id="pilih-batal" class="tombol sekunder">Batal</button>
+        <button id="pilih-gps" class="tombol sekunder">Di GPS saya</button>
+        <button id="pilih-tengah" class="tombol utama">Di tanda +</button>
+      </div>
+    </div>
+
+    <footer id="bilah-bawah" class="bilah-bawah">
+      <button id="tombol-tandai" class="tombol utama"><svg class="ikon" aria-hidden="true"><use href="#i-titik"/></svg><span>Tandai titik</span></button>
+      <button id="tombol-rekam" class="tombol sekunder"></button>
+    </footer>
+  </section>
+
+  <dialog id="dialog-fitur" class="lembar">
+    <form method="dialog">
+      <h2 id="fitur-judul">Titik</h2>
+      <label>Nama <input id="fitur-nama" maxlength="120" autocomplete="off" required></label>
+      <label>Catatan <textarea id="fitur-catatan" rows="3"></textarea></label>
+      <p id="fitur-info" class="info-kecil"></p>
+      <div class="aksi">
+        <button value="simpan" class="tombol utama">Simpan</button>
+        <button value="hapus" id="fitur-hapus" class="tombol bahaya" formnovalidate>Hapus</button>
+        <button value="lihat" id="fitur-lihat" class="tombol sekunder" formnovalidate>Lihat di peta</button>
+        <span class="spasi"></span>
+        <button value="batal" class="tombol sekunder" formnovalidate>Tutup</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialog-info" class="lembar">
+    <form method="dialog">
+      <h2>Info peta</h2>
+      <dl id="info-isi" class="info-daftar"></dl>
+      <div class="aksi">
+        <button value="hapus" class="tombol bahaya">Hapus peta</button>
+        <span class="spasi"></span>
+        <button value="tutup" class="tombol utama">Tutup</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialog-setelan" class="lembar">
+    <form method="dialog">
+      <h2>Setelan</h2>
+      <fieldset>
+        <legend>Format koordinat</legend>
+        <label class="pilihan"><input type="radio" name="format" value="dd"> Desimal <small>3.584210, 116.630120</small></label>
+        <label class="pilihan"><input type="radio" name="format" value="dms"> Derajat, menit, detik <small>3°35'03,2" LU</small></label>
+        <label class="pilihan"><input type="radio" name="format" value="utm"> UTM <small>50N 459123 mT 396456 mU</small></label>
+      </fieldset>
+      <label>Abaikan titik jalur yang akurasinya lebih buruk dari
+        <select id="setelan-akurasi">
+          <option value="10">10 m</option>
+          <option value="20">20 m</option>
+          <option value="30">30 m</option>
+          <option value="50">50 m</option>
+          <option value="100">100 m</option>
+        </select>
+      </label>
+      <p class="info-kecil">Peta dan data hanya tersimpan di peramban HP ini. Ekspor data (KML/GPX) secara berkala sebagai cadangan.</p>
+      <p id="info-penyimpanan" class="info-kecil"></p>
+      <div class="aksi"><span class="spasi"></span><button value="selesai" class="tombol utama">Selesai</button></div>
+    </form>
+  </dialog>
+
+  <div id="memuat" class="memuat" hidden><div class="pemutar"></div><p id="memuat-teks"></p></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
