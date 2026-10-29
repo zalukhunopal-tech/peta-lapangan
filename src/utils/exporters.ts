@@ -1,17 +1,17 @@
 // Ekspor dan impor titik/jalur dalam format KML dan GPX.
-// Bentuk fitur: { id, jenis: 'titik'|'jalur', nama, catatan, dibuat, titik: [{ lat, lon, alt?, waktu? }] }
-// DOMParser disuntikkan supaya bisa diuji di Node.
+import { Fitur, Titik } from '../types';
 
-const xml = (s) => String(s ?? '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
-const ada = (v) => v !== null && v !== undefined && Number.isFinite(Number(v));
+const xml = (s: any) =>
+  String(s ?? '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
+const ada = (v: any) => v !== null && v !== undefined && Number.isFinite(Number(v));
 
-export function buatId() {
+export function buatId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-export function keKML(fitur, judul = 'Peta Lapangan') {
-  const koord = (t) => `${t.lon},${t.lat}${ada(t.alt) ? `,${t.alt}` : ''}`;
-  const placemark = (f) => {
+export function keKML(fitur: Fitur[], judul = 'Peta Lapangan'): string {
+  const koord = (t: Titik) => `${t.lon},${t.lat}${ada(t.alt) ? `,${t.alt}` : ''}`;
+  const placemark = (f: Fitur) => {
     const geometri = f.jenis === 'titik'
       ? `<Point><coordinates>${koord(f.titik[0])}</coordinates></Point>`
       : `<LineString><tessellate>1</tessellate><coordinates>${f.titik.map(koord).join(' ')}</coordinates></LineString>`;
@@ -36,9 +36,9 @@ export function keKML(fitur, judul = 'Peta Lapangan') {
   ].join('\n');
 }
 
-export function keGPX(fitur) {
-  const isiTitik = (t) => `${ada(t.alt) ? `<ele>${t.alt}</ele>` : ''}${t.waktu ? `<time>${xml(t.waktu)}</time>` : ''}`;
-  const keterangan = (f) => `<name>${xml(f.nama)}</name>${f.catatan ? `<desc>${xml(f.catatan)}</desc>` : ''}`;
+export function keGPX(fitur: Fitur[]): string {
+  const isiTitik = (t: Titik) => `${ada(t.alt) ? `<ele>${t.alt}</ele>` : ''}${t.waktu ? `<time>${xml(t.waktu)}</time>` : ''}`;
+  const keterangan = (f: Fitur) => `<name>${xml(f.nama)}</name>${f.catatan ? `<desc>${xml(f.catatan)}</desc>` : ''}`;
   const wpt = fitur.filter((f) => f.jenis === 'titik').map((f) => {
     const t = f.titik[0];
     const waktu = t.waktu || f.dibuat;
@@ -57,13 +57,13 @@ export function keGPX(fitur) {
 
 // ---- Impor ----
 
-function namaLokal(n) {
+function namaLokal(n: any): string {
   return n.localName || String(n.nodeName).split(':').pop();
 }
 
-function turunan(el, nama) {
-  const hasil = [];
-  const jalan = (n) => {
+function turunan(el: any, nama: string): any[] {
+  const hasil: any[] = [];
+  const jalan = (n: any) => {
     for (let c = n.firstChild; c; c = c.nextSibling) {
       if (c.nodeType !== 1) continue;
       if (namaLokal(c) === nama) hasil.push(c);
@@ -74,33 +74,33 @@ function turunan(el, nama) {
   return hasil;
 }
 
-function anak(el, nama) {
+function anak(el: any, nama: string): any | null {
   for (let c = el.firstChild; c; c = c.nextSibling) if (c.nodeType === 1 && namaLokal(c) === nama) return c;
   return null;
 }
 
-const teks = (el) => (el ? el.textContent.trim() : '');
+const teks = (el: any) => (el ? el.textContent.trim() : '');
 
-function urai(isi, DOMParser) {
-  const doc = new DOMParser().parseFromString(isi, 'application/xml');
+function urai(isi: string, ParserClass = DOMParser) {
+  const doc = new ParserClass().parseFromString(isi, 'application/xml');
   if (turunan(doc, 'parsererror').length) throw new Error('Berkas XML rusak');
   return doc;
 }
 
-function koordinatKml(s) {
+function koordinatKml(s: string): Titik[] {
   return s.trim().split(/\s+/).map((tuple) => {
     const [lon, lat, alt] = tuple.split(',').map(Number);
     return Number.isFinite(alt) ? { lat, lon, alt } : { lat, lon };
   }).filter((t) => Number.isFinite(t.lat) && Number.isFinite(t.lon));
 }
 
-function fiturBaru(jenis, nama, catatan, titik, dibuat) {
+function fiturBaru(jenis: 'titik' | 'jalur', nama: string, catatan: string, titik: Titik[], dibuat?: string): Fitur {
   return { id: buatId(), jenis, nama, catatan, dibuat: dibuat || new Date().toISOString(), titik };
 }
 
-export function dariKML(isi, DOMParser) {
-  const hasil = [];
-  for (const pm of turunan(urai(isi, DOMParser), 'Placemark')) {
+export function dariKML(isi: string, ParserClass = DOMParser): Fitur[] {
+  const hasil: Fitur[] = [];
+  for (const pm of turunan(urai(isi, ParserClass), 'Placemark')) {
     const nama = teks(anak(pm, 'name'));
     const catatan = teks(anak(pm, 'description'));
     const waktu = teks(turunan(pm, 'when')[0]) || undefined;
@@ -116,8 +116,8 @@ export function dariKML(isi, DOMParser) {
   return hasil;
 }
 
-function titikGpx(el) {
-  const t = { lat: Number(el.getAttribute('lat')), lon: Number(el.getAttribute('lon')) };
+function titikGpx(el: any): Titik {
+  const t: Titik = { lat: Number(el.getAttribute('lat')), lon: Number(el.getAttribute('lon')) };
   const ele = Number(teks(anak(el, 'ele')));
   if (anak(el, 'ele') && Number.isFinite(ele)) t.alt = ele;
   const waktu = teks(anak(el, 'time'));
@@ -125,10 +125,10 @@ function titikGpx(el) {
   return t;
 }
 
-export function dariGPX(isi, DOMParser) {
-  const doc = urai(isi, DOMParser);
-  const hasil = [];
-  const sah = (t) => Number.isFinite(t.lat) && Number.isFinite(t.lon);
+export function dariGPX(isi: string, ParserClass = DOMParser): Fitur[] {
+  const doc = urai(isi, ParserClass);
+  const hasil: Fitur[] = [];
+  const sah = (t: Titik) => Number.isFinite(t.lat) && Number.isFinite(t.lon);
   for (const w of turunan(doc, 'wpt')) {
     const t = titikGpx(w);
     if (sah(t)) hasil.push(fiturBaru('titik', teks(anak(w, 'name')) || 'Titik', teks(anak(w, 'desc')), [t], t.waktu));

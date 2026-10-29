@@ -1,9 +1,6 @@
 // Penampil halaman peta PDF: geser satu jari, cubit dua jari, roda tetikus, dan lapisan gambar di atasnya.
 // Ruang "dasar" = viewport pdf.js skala 1 (px CSS, rotasi halaman sudah diperhitungkan).
 // Layar (px CSS) = dasar × zoom + geser.
-//
-// Halaman digambar sekali ke kanvas "dasar" beresolusi sedang. Setelah tampilan diam sebentar,
-// bagian yang terlihat digambar ulang setajam layar ("detail") lalu ditumpuk di atas kanvas dasar.
 
 const SISI_MAKS_DASAR = 3072;
 const LUAS_MAKS_DASAR = 8_000_000;
@@ -13,37 +10,52 @@ const AMBANG_KETUK_PX = 8;
 const WARNA_LATAR = '#dcdad3';
 
 export class TampilanPeta {
-  constructor(kanvas) {
+  public kanvas: HTMLCanvasElement;
+  public ctx: CanvasRenderingContext2D;
+  public zoom = 1;
+  public zoomPas = 1;
+  public gx = 0;
+  public gy = 0;
+  public lebar = 0;
+  public tinggi = 0;
+  public dpr = 1;
+  public halaman: any = null;
+  public vp1: any = null;
+  public dasar: HTMLCanvasElement | null = null;
+  public skalaDasar = 1;
+  public detail: { kanvas: HTMLCanvasElement; zoom: number; gx: number; gy: number } | null = null;
+  public tugasDetail: any = null;
+  public timerDetail: any = 0;
+  public bingkai = 0;
+  private pointer = new Map<number, { x: number; y: number }>();
+  private gestur: { zoom: number; gx: number; gy: number; titik: { x: number; y: number }[] } | null = null;
+  private ketuk: { x: number; y: number; waktu: number } | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+
+  // Kait untuk aplikasi
+  public gambarLapisan: ((ctx: CanvasRenderingContext2D, tampilan: TampilanPeta) => void) | null = null;
+  public saatKetuk: ((x: number, y: number) => void) | null = null;
+  public saatUbah: (() => void) | null = null;
+  public saatGeserManual: (() => void) | null = null;
+
+  constructor(kanvas: HTMLCanvasElement) {
     this.kanvas = kanvas;
-    this.ctx = kanvas.getContext('2d');
-    this.zoom = 1;
-    this.zoomPas = 1;
-    this.gx = 0;
-    this.gy = 0;
-    this.lebar = 0;
-    this.tinggi = 0;
-    this.dpr = 1;
-    this.halaman = null;
-    this.vp1 = null;
-    this.dasar = null;
-    this.skalaDasar = 1;
-    this.detail = null;
-    this.tugasDetail = null;
-    this.timerDetail = 0;
-    this.bingkai = 0;
-    this.pointer = new Map();
-    this.gestur = null;
-    this.ketuk = null;
-    // Kait untuk aplikasi
-    this.gambarLapisan = null; // (ctx, tampilan) => void, dalam px CSS
-    this.saatKetuk = null; // (x, y) px CSS
-    this.saatUbah = null; // tampilan bergeser/berubah zoom
-    this.saatGeserManual = null; // pengguna menggeser dengan satu jari
+    this.ctx = kanvas.getContext('2d')!;
     this._pasangInteraksi();
-    new ResizeObserver(() => this._ukurUlang()).observe(kanvas);
+    this.resizeObserver = new ResizeObserver(() => this._ukurUlang());
+    this.resizeObserver.observe(kanvas);
   }
 
-  async muat(dokumen, nomorHalaman) {
+  destroy() {
+    this._batalkanDetail();
+    if (this.bingkai) {
+      cancelAnimationFrame(this.bingkai);
+      this.bingkai = 0;
+    }
+    this.resizeObserver?.disconnect();
+  }
+
+  async muat(dokumen: any, nomorHalaman: number) {
     this.kosongkan();
     const halaman = await dokumen.getPage(nomorHalaman);
     const vp1 = halaman.getViewport({ scale: 1 });
@@ -55,7 +67,7 @@ export class TampilanPeta {
     const dasar = document.createElement('canvas');
     dasar.width = Math.ceil(vp.width);
     dasar.height = Math.ceil(vp.height);
-    await halaman.render({ canvasContext: dasar.getContext('2d'), viewport: vp }).promise;
+    await halaman.render({ canvasContext: dasar.getContext('2d')!, viewport: vp }).promise;
     this.halaman = halaman;
     this.vp1 = vp1;
     this.skalaDasar = skala;
@@ -81,7 +93,7 @@ export class TampilanPeta {
     this._berubah();
   }
 
-  zoomDi(sx, sy, faktor) {
+  zoomDi(sx: number, sy: number, faktor: number) {
     if (!this.vp1) return;
     const z = this._batasiZoom(this.zoom * faktor);
     const f = z / this.zoom;
@@ -91,8 +103,7 @@ export class TampilanPeta {
     this._berubah();
   }
 
-  // Pusatkan tampilan pada titik halaman PDF (ruang pengguna).
-  pusatkan(x, y, zoom = this.zoom) {
+  pusatkan(x: number, y: number, zoom = this.zoom) {
     if (!this.vp1) return;
     const [bx, by] = this.vp1.convertToViewportPoint(x, y);
     this.zoom = this._batasiZoom(zoom);
@@ -101,19 +112,20 @@ export class TampilanPeta {
     this._berubah();
   }
 
-  // Matriks [a, b, c, d, e, f] dari ruang pengguna PDF ke px CSS layar.
-  matriksLayar() {
+  matriksLayar(): [number, number, number, number, number, number] {
+    if (!this.vp1) return [1, 0, 0, 1, 0, 0];
     const [a, b, c, d, e, f] = this.vp1.transform;
     const z = this.zoom;
     return [a * z, b * z, c * z, d * z, e * z + this.gx, f * z + this.gy];
   }
 
-  keLayar(x, y) {
+  keLayar(x: number, y: number): [number, number] {
     const m = this.matriksLayar();
     return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
   }
 
-  dariLayar(sx, sy) {
+  dariLayar(sx: number, sy: number): [number, number] {
+    if (!this.vp1) return [0, 0];
     return this.vp1.convertToPdfPoint((sx - this.gx) / this.zoom, (sy - this.gy) / this.zoom);
   }
 
@@ -125,17 +137,17 @@ export class TampilanPeta {
     });
   }
 
-  _berubah() {
+  private _berubah() {
     this.gambar();
     this._jadwalkanDetail();
     this.saatUbah?.();
   }
 
-  _batasiZoom(z) {
+  private _batasiZoom(z: number): number {
     return Math.min(ZOOM_MAKS, Math.max(this.zoomPas * 0.5, z));
   }
 
-  _ukurUlang() {
+  public _ukurUlang() {
     const r = this.kanvas.getBoundingClientRect();
     if (!r.width || !r.height) return;
     const pusat = this.vp1 && this.lebar
@@ -158,7 +170,7 @@ export class TampilanPeta {
     this._jadwalkanDetail();
   }
 
-  _render() {
+  private _render() {
     const { ctx, dpr } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = WARNA_LATAR;
@@ -172,8 +184,7 @@ export class TampilanPeta {
     ctx.drawImage(this.dasar, 0, 0);
 
     const dt = this.detail;
-    if (dt) {
-      // Detail digambar untuk zoom/geser saat dirender; skala ulang ke tampilan sekarang.
+    if (dt && this.vp1) {
       const f = z / dt.zoom;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -188,20 +199,24 @@ export class TampilanPeta {
     this.gambarLapisan?.(ctx, this);
   }
 
-  _jadwalkanDetail() {
+  private _jadwalkanDetail() {
     this._batalkanDetail();
     if (this.halaman) this.timerDetail = setTimeout(() => this._renderDetail(), JEDA_DETAIL_MS);
   }
 
-  _batalkanDetail() {
+  private _batalkanDetail() {
     clearTimeout(this.timerDetail);
     if (this.tugasDetail) {
-      this.tugasDetail.cancel();
+      try {
+        this.tugasDetail.cancel();
+      } catch {
+        // ignore cancellation
+      }
       this.tugasDetail = null;
     }
   }
 
-  async _renderDetail() {
+  private async _renderDetail() {
     if (!this.halaman || this.pointer.size) return;
     const skala = this.zoom * this.dpr;
     if (skala <= this.skalaDasar * 1.1) {
@@ -216,7 +231,7 @@ export class TampilanPeta {
     kanvas.height = this.kanvas.height;
     const keadaan = { zoom: this.zoom, gx: this.gx, gy: this.gy };
     const viewport = this.halaman.getViewport({ scale: skala, offsetX: this.gx * this.dpr, offsetY: this.gy * this.dpr });
-    const tugas = this.halaman.render({ canvasContext: kanvas.getContext('2d'), viewport });
+    const tugas = this.halaman.render({ canvasContext: kanvas.getContext('2d')!, viewport });
     this.tugasDetail = tugas;
     try {
       await tugas.promise;
@@ -224,14 +239,14 @@ export class TampilanPeta {
       this.tugasDetail = null;
       this.detail = { kanvas, ...keadaan };
       this.gambar();
-    } catch (e) {
+    } catch (e: any) {
       if (e?.name !== 'RenderingCancelledException') console.warn('Gagal menggambar detail peta', e);
     }
   }
 
-  _pasangInteraksi() {
+  private _pasangInteraksi() {
     const k = this.kanvas;
-    const posisi = (e) => {
+    const posisi = (e: PointerEvent) => {
       const r = k.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
@@ -247,7 +262,7 @@ export class TampilanPeta {
       this.pointer.set(e.pointerId, posisi(e));
       this._gerakGestur();
     });
-    const selesai = (e) => {
+    const selesai = (e: PointerEvent) => {
       if (!this.pointer.has(e.pointerId)) return;
       this.pointer.delete(e.pointerId);
       if (this.ketuk && e.type === 'pointerup' && performance.now() - this.ketuk.waktu < 500) {
@@ -261,16 +276,16 @@ export class TampilanPeta {
     k.addEventListener('pointercancel', selesai);
     k.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const p = posisi(e);
+      const p = posisi(e as any);
       this.zoomDi(p.x, p.y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
     }, { passive: false });
   }
 
-  _mulaiGestur() {
+  private _mulaiGestur() {
     this.gestur = { zoom: this.zoom, gx: this.gx, gy: this.gy, titik: [...this.pointer.values()].map((p) => ({ ...p })) };
   }
 
-  _gerakGestur() {
+  private _gerakGestur() {
     const g = this.gestur;
     if (!g || !this.vp1) return;
     const titik = [...this.pointer.values()];

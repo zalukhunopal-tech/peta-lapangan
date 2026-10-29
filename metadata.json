@@ -1,0 +1,8 @@
+{
+  "name": "Peta Lapangan",
+  "description": "Buka peta GeoPDF secara offline, lihat posisi GPS, tandai titik, dan rekam jalur di lapangan.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "permissions": []
+}

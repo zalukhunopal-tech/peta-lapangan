@@ -1,20 +1,22 @@
 // Georeferensi GeoPDF: membaca titik kontrol dari PDF lalu membuat transformasi
 // lintang/bujur <-> koordinat halaman (ruang pengguna PDF, satuan point).
-//
-// Format yang dibaca:
-//  - ISO 32000: /VP pada halaman berisi /Measure dengan /Subtype /GEO, /GPTS (lintang, bujur),
-//    /LPTS (titik dalam kotak satuan /BBox), /Bounds (batas peta) dan /GCS (EPSG dan/atau WKT).
-//  - OGC "LGIDict": /CTM atau /Registration dalam koordinat UTM atau geografis.
-//
-// PDFLib (pdf-lib) dan proj4 disuntikkan supaya modul ini sama untuk peramban dan tes Node.
 
-import { definisiEpsg } from './epsg.js';
+import * as PDFLibDefault from 'pdf-lib';
+import proj4Default from 'proj4';
+import { definisiEpsg } from './epsg';
+import { BatasGeo, CrsInfo, GeoRefInfo, Transformasi, ViewportInfo } from '../types';
 
-// Sisa afin di atas ini menandakan proyeksi yang tertulis tidak cocok dengan titik kontrol.
 const BATAS_SISA_AFIN_M = 5;
 const M_PER_DERAJAT = 111320;
 
-export async function bacaGeoreferensi(bytes, { PDFLib, proj4 }) {
+export async function bacaGeoreferensi(
+  bytes: Uint8Array,
+  injected: { PDFLib?: any; proj4?: any } = {}
+): Promise<GeoRefInfo | null> {
+  const PDFLib = injected.PDFLib || PDFLibDefault;
+  const p4 = injected.proj4 || proj4Default;
+  const proj4 = p4.default || p4;
+
   const doc = await PDFLib.PDFDocument.load(bytes, {
     ignoreEncryption: true,
     updateMetadata: false,
@@ -25,23 +27,22 @@ export async function bacaGeoreferensi(bytes, { PDFLib, proj4 }) {
   for (let i = 0; i < halaman.length; i++) {
     const node = halaman[i].node;
     const vp = keJs(node.get(PDFLib.PDFName.of('VP')), 6);
-    const viewports = (Array.isArray(vp) ? vp : []).map(bacaViewportIso).filter(Boolean);
+    const viewports = (Array.isArray(vp) ? vp : []).map(bacaViewportIso).filter(Boolean) as ViewportInfo[];
     if (viewports.length) return { format: 'iso32000', halaman: i, viewports };
 
     const lgi = keJs(node.get(PDFLib.PDFName.of('LGIDict')), 5);
     const kotak = halaman[i].getMediaBox();
     const dariLgi = (Array.isArray(lgi) ? lgi : lgi ? [lgi] : [])
-      .map((d) => bacaLgi(d, kotak, proj4))
-      .filter(Boolean);
+      .map((d: any) => bacaLgi(d, kotak, proj4))
+      .filter(Boolean) as ViewportInfo[];
     if (dariLgi.length) return { format: 'ogc-lgi', halaman: i, viewports: dariLgi };
   }
   return null;
 }
 
-// Ubah objek pdf-lib menjadi nilai JavaScript biasa (angka, teks, larik, objek).
-function pembuatKeJs(PDFLib, context) {
+function pembuatKeJs(PDFLib: any, context: any) {
   const { PDFRef, PDFNumber, PDFString, PDFHexString, PDFName, PDFArray, PDFDict, PDFBool } = PDFLib;
-  const keJs = (obj, kedalaman) => {
+  const keJs = (obj: any, kedalaman: number): any => {
     if (obj instanceof PDFRef) obj = context.lookup(obj);
     if (obj == null) return null;
     if (obj instanceof PDFNumber) return obj.asNumber();
@@ -49,9 +50,9 @@ function pembuatKeJs(PDFLib, context) {
     if (obj instanceof PDFName) return obj.decodeText();
     if (obj instanceof PDFBool) return obj.asBoolean();
     if (kedalaman <= 0) return null;
-    if (obj instanceof PDFArray) return obj.asArray().map((o) => keJs(o, kedalaman - 1));
+    if (obj instanceof PDFArray) return obj.asArray().map((o: any) => keJs(o, kedalaman - 1));
     if (obj instanceof PDFDict) {
-      const hasil = {};
+      const hasil: Record<string, any> = {};
       for (const [kunci, nilai] of obj.entries()) {
         const k = kunci.decodeText();
         if (k === 'Parent' || k === 'P') continue;
@@ -64,15 +65,15 @@ function pembuatKeJs(PDFLib, context) {
   return keJs;
 }
 
-const angka = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
-const deretAngka = (v) => (Array.isArray(v) ? v.map(angka) : null);
-const berpasangan = (a) => {
-  const hasil = [];
+const angka = (v: any) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+const deretAngka = (v: any) => (Array.isArray(v) ? v.map(angka) : null);
+const berpasangan = (a: number[]): [number, number][] => {
+  const hasil: [number, number][] = [];
   for (let i = 0; i + 1 < a.length; i += 2) hasil.push([a[i], a[i + 1]]);
   return hasil;
 };
 
-function bacaViewportIso(vp) {
+function bacaViewportIso(vp: any): ViewportInfo | null {
   const m = vp && vp.Measure;
   if (!m || m.Subtype !== 'GEO') return null;
   const bbox = deretAngka(vp.BBox);
@@ -84,7 +85,7 @@ function bacaViewportIso(vp) {
 
   const x1 = Math.min(bbox[0], bbox[2]), x2 = Math.max(bbox[0], bbox[2]);
   const y1 = Math.min(bbox[1], bbox[3]), y2 = Math.max(bbox[1], bbox[3]);
-  const keHalaman = ([u, v]) => [x1 + u * (x2 - x1), y1 + v * (y2 - y1)];
+  const keHalaman = ([u, v]: [number, number]): [number, number] => [x1 + u * (x2 - x1), y1 + v * (y2 - y1)];
 
   const geo = berpasangan(gpts);
   const lokal = berpasangan(lpts);
@@ -109,12 +110,11 @@ function bacaViewportIso(vp) {
   };
 }
 
-// OGC LGIDict: koordinat proyeksi diperoleh dari /CTM (matriks halaman -> proyeksi) atau /Registration.
-function bacaLgi(lgi, kotak, proj4) {
+function bacaLgi(lgi: any, kotak: any, proj4: any): ViewportInfo | null {
   if (!lgi || typeof lgi !== 'object') return null;
   const proyeksi = lgi.Projection || {};
   const jenis = String(proyeksi.ProjectionType || '').toUpperCase();
-  let def = null;
+  let def: string | null = null;
   if (jenis === 'UT') {
     const zona = angka(proyeksi.Zone);
     if (!Number.isFinite(zona)) return null;
@@ -127,18 +127,18 @@ function bacaLgi(lgi, kotak, proj4) {
   }
 
   const neatline = deretAngka(lgi.Neatline);
-  const sudut = neatline && neatline.length >= 6
+  const sudut: [number, number][] = neatline && neatline.length >= 6
     ? berpasangan(neatline)
     : [[kotak.x, kotak.y], [kotak.x, kotak.y + kotak.height], [kotak.x + kotak.width, kotak.y + kotak.height], [kotak.x + kotak.width, kotak.y]];
 
-  let pasangan = [];
+  let pasangan: { x: number; y: number; X: number; Y: number }[] = [];
   const ctm = deretAngka(lgi.CTM);
   if (ctm && ctm.length === 6 && !ctm.some(Number.isNaN)) {
     pasangan = sudut.map(([x, y]) => ({ x, y, X: ctm[0] * x + ctm[2] * y + ctm[4], Y: ctm[1] * x + ctm[3] * y + ctm[5] }));
   } else if (Array.isArray(lgi.Registration)) {
     pasangan = lgi.Registration.map(deretAngka)
-      .filter((r) => r && r.length >= 4 && !r.some(Number.isNaN))
-      .map(([x, y, X, Y]) => ({ x, y, X, Y }));
+      .filter((r: any) => r && r.length >= 4 && !r.some(Number.isNaN))
+      .map(([x, y, X, Y]: [number, number, number, number]) => ({ x, y, X, Y }));
   }
   if (pasangan.length < 3) return null;
 
@@ -157,18 +157,17 @@ function bacaLgi(lgi, kotak, proj4) {
   };
 }
 
-function kotakDari(titik) {
+function kotakDari(titik: [number, number][]): [number, number, number, number] {
   const xs = titik.map((t) => t[0]), ys = titik.map((t) => t[1]);
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
-export function pilihViewportUtama(info) {
-  const luas = (v) => (v.bbox[2] - v.bbox[0]) * (v.bbox[3] - v.bbox[1]);
+export function pilihViewportUtama(info: GeoRefInfo): ViewportInfo {
+  const luas = (v: ViewportInfo) => (v.bbox[2] - v.bbox[0]) * (v.bbox[3] - v.bbox[1]);
   return info.viewports.reduce((a, b) => (luas(b) > luas(a) ? b : a));
 }
 
-// Ambil GEOGCS di dalam WKT PROJCS: GPTS dinyatakan dalam datum geografis peta itu sendiri.
-function ambilGeogcs(wkt) {
+function ambilGeogcs(wkt?: string | null): string | null {
   if (!wkt) return null;
   const awal = wkt.search(/GEOG(CS|CRS)\s*\[/i);
   if (awal < 0) return null;
@@ -180,7 +179,7 @@ function ambilGeogcs(wkt) {
   return null;
 }
 
-function definisiPeta(crs, proj4) {
+function definisiPeta(crs: CrsInfo | undefined, proj4: any): { def: string; geografis: boolean } | null {
   if (!crs) return null;
   if (crs.proj4) return { def: crs.proj4, geografis: /\+proj=longlat/.test(crs.proj4) };
   if (crs.wkt) {
@@ -197,7 +196,7 @@ function definisiPeta(crs, proj4) {
   return null;
 }
 
-export function namaCrs(crs) {
+export function namaCrs(crs?: CrsInfo | null): string {
   const m = crs?.wkt && crs.wkt.match(/^\s*(?:PROJCS|GEOGCS|PROJCRS|GEOGCRS)\s*\[\s*"([^"]+)"/i);
   if (m) return crs.epsg ? `${m[1]} (EPSG:${crs.epsg})` : m[1];
   if (crs?.epsg) return `EPSG:${crs.epsg}`;
@@ -208,7 +207,8 @@ export function namaCrs(crs) {
   return 'Tidak diketahui';
 }
 
-export function buatTransformasi(vp, proj4) {
+export function buatTransformasi(vp: ViewportInfo, p4: any = proj4Default): Transformasi {
+  const proj4 = p4.default || p4;
   const titik = vp.kontrol;
   if (titik.length < 3) throw new Error('Titik kontrol georeferensi kurang dari 3');
   const peta = definisiPeta(vp.crs, proj4);
@@ -220,17 +220,17 @@ export function buatTransformasi(vp, proj4) {
       const hal = titik.map((k) => [k.x, k.y]);
       const ruangPeta = titik.map((k) => kontrolKePeta.forward([k.lon, k.lat]));
       const A = cocokkanAfin(hal, ruangPeta);
-      const sisa = sisaMaks((p) => terapkanAfin(A, p), hal, ruangPeta);
+      const sisa = sisaMaks((p: [number, number]) => terapkanAfin(A, p), hal, ruangPeta);
       const sisaMeter = peta.geografis ? sisa * M_PER_DERAJAT : sisa;
       if (Number.isFinite(sisaMeter) && sisaMeter <= BATAS_SISA_AFIN_M) {
         const Ai = balikAfin(A);
         return {
           metode: peta.geografis ? 'afin-geografis' : 'afin-proyeksi',
           sisaMeter,
-          keHalaman(lat, lon) {
-            return terapkanAfin(Ai, gpsKePeta.forward([lon, lat]));
+          keHalaman(lat: number, lon: number) {
+            return terapkanAfin(Ai, gpsKePeta.forward([lon, lat])) as [number, number];
           },
-          keGeografis(x, y) {
+          keGeografis(x: number, y: number) {
             const [lon, lat] = gpsKePeta.inverse(terapkanAfin(A, [x, y]));
             return { lat, lon };
           },
@@ -245,21 +245,21 @@ export function buatTransformasi(vp, proj4) {
   const hal = titik.map((k) => [k.x, k.y]);
   const H = cocokkanHomografi(geo, hal);
   const Hi = cocokkanHomografi(hal, geo);
-  const sisa = sisaMaks((p) => terapkanHomografi(Hi, p), hal, geo) * M_PER_DERAJAT;
+  const sisa = sisaMaks((p: [number, number]) => terapkanHomografi(Hi, p), hal, geo) * M_PER_DERAJAT;
   return {
     metode: 'homografi',
     sisaMeter: titik.length > 4 ? sisa : null,
-    keHalaman(lat, lon) {
-      return terapkanHomografi(H, [lon, lat]);
+    keHalaman(lat: number, lon: number) {
+      return terapkanHomografi(H, [lon, lat]) as [number, number];
     },
-    keGeografis(x, y) {
+    keGeografis(x: number, y: number) {
       const [lon, lat] = terapkanHomografi(Hi, [x, y]);
       return { lat, lon };
     },
   };
 }
 
-export function batasGeo(vp, tf) {
+export function batasGeo(vp: ViewportInfo, tf: Transformasi): BatasGeo {
   const titik = vp.batas.map(([x, y]) => tf.keGeografis(x, y));
   return {
     selatan: Math.min(...titik.map((t) => t.lat)),
@@ -269,12 +269,12 @@ export function batasGeo(vp, tf) {
   };
 }
 
-export function diDalamBatas(vp, tf, lat, lon) {
+export function diDalamBatas(vp: ViewportInfo, tf: Transformasi, lat: number, lon: number): boolean {
   const [x, y] = tf.keHalaman(lat, lon);
   return titikDalamPoligon(x, y, vp.batas);
 }
 
-function titikDalamPoligon(x, y, poligon) {
+function titikDalamPoligon(x: number, y: number, poligon: [number, number][]): boolean {
   let dalam = false;
   for (let i = 0, j = poligon.length - 1; i < poligon.length; j = i++) {
     const [xi, yi] = poligon[i], [xj, yj] = poligon[j];
@@ -283,15 +283,12 @@ function titikDalamPoligon(x, y, poligon) {
   return dalam;
 }
 
-// ---- Aljabar kecil: afin dan homografi dengan kuadrat terkecil ----
-
-function rataRata(titik) {
+function rataRata(titik: number[][]): [number, number] {
   const n = titik.length;
   return [titik.reduce((s, p) => s + p[0], 0) / n, titik.reduce((s, p) => s + p[1], 0) / n];
 }
 
-// u = a·x + b·y + c ; v = d·x + e·y + f  →  [a, b, c, d, e, f]
-function cocokkanAfin(asal, tujuan) {
+function cocokkanAfin(asal: number[][], tujuan: number[][]): number[] {
   const ma = rataRata(asal), mt = rataRata(tujuan);
   let sxx = 0, sxy = 0, syy = 0, sxu = 0, syu = 0, sxv = 0, syv = 0;
   for (let i = 0; i < asal.length; i++) {
@@ -307,11 +304,11 @@ function cocokkanAfin(asal, tujuan) {
   return [a, b, mt[0] - a * ma[0] - b * ma[1], d, e, mt[1] - d * ma[0] - e * ma[1]];
 }
 
-function terapkanAfin(A, [x, y]) {
+function terapkanAfin(A: number[], [x, y]: [number, number]): [number, number] {
   return [A[0] * x + A[1] * y + A[2], A[3] * x + A[4] * y + A[5]];
 }
 
-function balikAfin(A) {
+function balikAfin(A: number[]): number[] {
   const det = A[0] * A[4] - A[1] * A[3];
   return [
     A[4] / det, -A[1] / det, (A[1] * A[5] - A[4] * A[2]) / det,
@@ -319,39 +316,37 @@ function balikAfin(A) {
   ];
 }
 
-function sisaMaks(f, asal, tujuan) {
+function sisaMaks(f: (p: [number, number]) => [number, number], asal: number[][], tujuan: number[][]): number {
   let maks = 0;
   for (let i = 0; i < asal.length; i++) {
-    const [u, v] = f(asal[i]);
+    const [u, v] = f(asal[i] as [number, number]);
     maks = Math.max(maks, Math.hypot(u - tujuan[i][0], v - tujuan[i][1]));
   }
   return maks;
 }
 
-// Matriks normalisasi: geser ke rata-rata dan skala agar jarak rata-rata √2.
-function normalisasi(titik) {
+function normalisasi(titik: number[][]) {
   const [mx, my] = rataRata(titik);
   const r = titik.reduce((s, p) => s + Math.hypot(p[0] - mx, p[1] - my), 0) / titik.length || 1;
   const s = Math.SQRT2 / r;
   return { T: [s, 0, -s * mx, 0, s, -s * my, 0, 0, 1], Ti: [1 / s, 0, mx, 0, 1 / s, my, 0, 0, 1] };
 }
 
-function kali3(A, B) {
+function kali3(A: number[], B: number[]): number[] {
   const C = new Array(9).fill(0);
   for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) C[i * 3 + j] += A[i * 3 + k] * B[k * 3 + j];
   return C;
 }
 
-function cocokkanHomografi(asal, tujuan) {
+function cocokkanHomografi(asal: number[][], tujuan: number[][]): number[] {
   const na = normalisasi(asal), nt = normalisasi(tujuan);
-  const A = [], b = [];
+  const A: number[][] = [], b: number[] = [];
   for (let i = 0; i < asal.length; i++) {
-    const [x, y] = terapkanHomografi(na.T, asal[i]);
-    const [u, v] = terapkanHomografi(nt.T, tujuan[i]);
+    const [x, y] = terapkanHomografi(na.T, asal[i] as [number, number]);
+    const [u, v] = terapkanHomografi(nt.T, tujuan[i] as [number, number]);
     A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]); b.push(u);
     A.push([0, 0, 0, x, y, 1, -x * v, -y * v]); b.push(v);
   }
-  // Persamaan normal (AᵀA)h = Aᵀb
   const M = Array.from({ length: 8 }, () => new Array(9).fill(0));
   for (let r = 0; r < A.length; r++) {
     for (let i = 0; i < 8; i++) {
@@ -363,8 +358,7 @@ function cocokkanHomografi(asal, tujuan) {
   return kali3(nt.Ti, kali3([...h, 1], na.T));
 }
 
-// Eliminasi Gauss dengan pivot parsial pada matriks teraugmentasi n×(n+1).
-function selesaikan(M) {
+function selesaikan(M: number[][]): number[] {
   const n = M.length;
   for (let k = 0; k < n; k++) {
     let p = k;
@@ -385,7 +379,7 @@ function selesaikan(M) {
   return x;
 }
 
-function terapkanHomografi(H, [x, y]) {
+function terapkanHomografi(H: number[], [x, y]: [number, number]): [number, number] {
   const w = H[6] * x + H[7] * y + H[8];
   return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w];
 }

@@ -2,9 +2,9 @@
 
 const NAMA_DB = 'peta-lapangan';
 const VERSI_DB = 1;
-let koneksi = null;
+let koneksi: Promise<IDBDatabase> | null = null;
 
-function buka() {
+function buka(): Promise<IDBDatabase> {
   koneksi ??= new Promise((ok, gagal) => {
     const req = indexedDB.open(NAMA_DB, VERSI_DB);
     req.onupgradeneeded = () => {
@@ -18,7 +18,7 @@ function buka() {
   return koneksi;
 }
 
-async function jalankan(store, mode, aksi) {
+async function jalankan<T>(store: 'peta' | 'fitur', mode: IDBTransactionMode, aksi: (s: IDBObjectStore) => IDBRequest): Promise<T> {
   const d = await buka();
   return new Promise((ok, gagal) => {
     const tx = d.transaction(store, mode);
@@ -30,8 +30,8 @@ async function jalankan(store, mode, aksi) {
 }
 
 export const db = {
-  semua: (store) => jalankan(store, 'readonly', (s) => s.getAll()),
-  ambil: (store, id) => jalankan(store, 'readonly', (s) => s.get(id)),
-  simpan: (store, obj) => jalankan(store, 'readwrite', (s) => s.put(obj)),
-  hapus: (store, id) => jalankan(store, 'readwrite', (s) => s.delete(id)),
+  semua: <T>(store: 'peta' | 'fitur') => jalankan<T[]>(store, 'readonly', (s) => s.getAll()),
+  ambil: <T>(store: 'peta' | 'fitur', id: string) => jalankan<T | undefined>(store, 'readonly', (s) => s.get(id)),
+  simpan: <T>(store: 'peta' | 'fitur', obj: T) => jalankan<void>(store, 'readwrite', (s) => s.put(obj)),
+  hapus: (store: 'peta' | 'fitur', id: string) => jalankan<void>(store, 'readwrite', (s) => s.delete(id)),
 };

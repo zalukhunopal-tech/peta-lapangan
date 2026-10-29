@@ -1,20 +1,18 @@
 // Satu pemantau GPS bersama untuk beberapa pelanggan (penampil peta, perekam jalur).
-// GPS hanya aktif selama ada pelanggan, supaya baterai hemat.
+import { PosisiGPS } from '../types';
 
-const PESAN_GALAT = {
+const PESAN_GALAT: Record<number, string> = {
   1: 'Izin lokasi ditolak. Izinkan akses lokasi untuk aplikasi ini di setelan peramban.',
   2: 'Lokasi tidak tersedia. Pastikan Lokasi/GPS di HP menyala.',
   3: 'Sinyal GPS belum didapat. Coba di tempat terbuka.',
 };
 
 export class LayananGps {
-  constructor() {
-    this.pelanggan = new Map();
-    this.idPantau = null;
-    this.terakhir = null;
-  }
+  private pelanggan = new Map<string, { saatPosisi: (pos: PosisiGPS) => void; saatGalat: (err: string) => void }>();
+  private idPantau: number | null = null;
+  public terakhir: PosisiGPS | null = null;
 
-  langganan(kunci, saatPosisi, saatGalat = () => {}) {
+  langganan(kunci: string, saatPosisi: (pos: PosisiGPS) => void, saatGalat: (err: string) => void = () => {}) {
     this.pelanggan.set(kunci, { saatPosisi, saatGalat });
     if (!('geolocation' in navigator)) {
       saatGalat('Perangkat atau peramban ini tidak mendukung GPS.');
@@ -44,7 +42,7 @@ export class LayananGps {
     );
   }
 
-  berhenti(kunci) {
+  berhenti(kunci: string) {
     this.pelanggan.delete(kunci);
     if (this.pelanggan.size === 0 && this.idPantau !== null) {
       navigator.geolocation.clearWatch(this.idPantau);
